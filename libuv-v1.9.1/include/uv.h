@@ -399,15 +399,22 @@ struct uv_shutdown_s {
 };
 
 
+// uv_handle_t 是一个基类，有很多子类继承于他
+// handle 代表生命周期比较长的对象
+// 一个处于 active 状态的 prepare handle，他的回调会在每次事件循环化的时候被执行
+// 一个 tcp handle 在每次有连接到来时，执行他的回调
 #define UV_HANDLE_FIELDS                                                      \
-  /* public */                                                                \
+  /* 自定义的数据 */                                                           \
   void* data;                                                                 \
-  /* read-only */                                                             \
+  /* 所属的事件循环 */                                                         \
   uv_loop_t* loop;                                                            \
+  /* handle 类型 */                                                           \
   uv_handle_type type;                                                        \
-  /* private */                                                               \
+  /* handle 被关闭后被执行的回调 */                                            \
   uv_close_cb close_cb;                                                       \
+  /* 用于组织 handle 队列的前置后置指针 */                                      \
   void* handle_queue[2];                                                      \
+  /* 文件描述符 */                                                             \
   union {                                                                     \
     int fd;                                                                   \
     void* reserved[4];                                                        \
@@ -441,9 +448,11 @@ UV_EXTERN uv_buf_t uv_buf_init(char* base, unsigned int len);
 
 
 #define UV_STREAM_FIELDS                                                      \
-  /* number of bytes queued for writing */                                    \
+  /* 等待发送的字节数 */                                                       \
   size_t write_queue_size;                                                    \
+  /* 分配内存的函数 */                                                         \
   uv_alloc_cb alloc_cb;                                                       \
+  /* 读取数据成功时执行的回调 */
   uv_read_cb read_cb;                                                         \
   /* private */                                                               \
   UV_STREAM_PRIVATE_FIELDS
@@ -456,8 +465,8 @@ UV_EXTERN uv_buf_t uv_buf_init(char* base, unsigned int len);
  * uv_stream_t is the parent class of uv_tcp_t, uv_pipe_t and uv_tty_t.
  */
 struct uv_stream_s {
-  UV_HANDLE_FIELDS
-  UV_STREAM_FIELDS
+  UV_HANDLE_FIELDS      // 继承 UV_HANDLE_FIELDS 的字段
+  UV_STREAM_FIELDS      
 };
 
 UV_EXTERN int uv_listen(uv_stream_t* stream, int backlog, uv_connection_cb cb);
@@ -507,8 +516,8 @@ UV_EXTERN int uv_is_closing(const uv_handle_t* handle);
  * Represents a TCP stream or TCP server.
  */
 struct uv_tcp_s {
-  UV_HANDLE_FIELDS
-  UV_STREAM_FIELDS
+  UV_HANDLE_FIELDS        // 继承 UV_HANDLE_FIELDS
+  UV_STREAM_FIELDS        // 继承 UV_STREAM_FIELDS
   UV_TCP_PRIVATE_FIELDS
 };
 
@@ -1457,14 +1466,11 @@ union uv_any_req {
 
 
 struct uv_loop_s {
-  /* User data - use this for whatever. */
-  void* data;
-  /* Loop reference counting. */
-  unsigned int active_handles;
-  void* handle_queue[2];
-  void* active_reqs[2];
-  /* Internal flag to signal loop stop. */
-  unsigned int stop_flag;
+  void* data;                   // 用户自定义数据的字段
+  unsigned int active_handles;  // 活跃 handle 个数
+  void* handle_queue[2];        // handle 队列
+  void* active_reqs[2];         // request 个数
+  unsigned int stop_flag;       // 事件循环是否结束的标记
   UV_LOOP_PRIVATE_FIELDS
 };
 

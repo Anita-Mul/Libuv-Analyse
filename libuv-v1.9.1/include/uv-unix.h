@@ -193,6 +193,7 @@ typedef struct {
   char* errmsg;
 } uv_lib_t;
 
+
 #define UV_LOOP_PRIVATE_FIELDS                                                \
   unsigned long flags;                                                        \
   int backend_fd;                                                             \
@@ -253,27 +254,42 @@ typedef struct {
   uv_buf_t bufsml[4];                                                         \
 
 #define UV_HANDLE_PRIVATE_FIELDS                                              \
+  /* 用于插入 close 阶段队列 */                                                \
   uv_handle_t* next_closing;                                                  \
+  /* handle 的状态和标记 */                                                    \
   unsigned int flags;                                                         \
 
 #define UV_STREAM_PRIVATE_FIELDS                                              \
+  /* 连接成功后，执行 connect_req 的回调（connect_req 在 uv_xxx_connect 中赋值） */  \
   uv_connect_t *connect_req;                                                  \
+  /* 关闭写端的时候，发送完缓存的数据，回调 shutdown_req 的回调（shutdown_req 在 uv_shutdown 的时候赋值）*/  \                                                \
   uv_shutdown_t *shutdown_req;                                                \
+  /* 用于插入 epoll，注册读写事件 */                                           \
   uv__io_t io_watcher;                                                        \
+  /* 待发送队列 */                                                            \
   void* write_queue[2];                                                       \
+  /* 发送完成的队列 */                                                         \
   void* write_completed_queue[2];                                             \
+  /* 收到连接，并且 accept 后执行 connection_cb 回调 */                        \
   uv_connection_cb connection_cb;                                             \
+  /* socket 操作失败的错误码 */                                                \
   int delayed_error;                                                          \
+  /* accept 返回的 fd */                                                      \
   int accepted_fd;                                                            \
+  /* 已经 accept 了一个 fd，又有新的 fd，暂存起来 */                            \
   void* queued_fds;                                                           \
   UV_STREAM_PRIVATE_PLATFORM_FIELDS                                           \
 
 #define UV_TCP_PRIVATE_FIELDS /* empty */
 
 #define UV_UDP_PRIVATE_FIELDS                                                 \
+  /* 分配接收数据的内存 */                                                     \
   uv_alloc_cb alloc_cb;                                                       \
+  /* 接收完数据后执行的回调 */                                                 \
   uv_udp_recv_cb recv_cb;                                                     \
+  /* 插入 epoll 里的 io 观察者，实现数据读写 */                                 \
   uv__io_t io_watcher;                                                        \
+  /* 待发送队列 */                                                             \
   void* write_queue[2];                                                       \
   void* write_completed_queue[2];                                             \
 
