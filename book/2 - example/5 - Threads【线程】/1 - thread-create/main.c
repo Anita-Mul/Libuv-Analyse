@@ -46,3 +46,30 @@ int main() {
     uv_thread_join(&tortoise_id);
     return 0;
 }
+
+
+/*
+    执行结果
+    Tortoise ran another step
+    Hare ran another step
+    Hare ran another step
+    Tortoise ran another step
+    Hare ran another step
+    Hare ran another step
+    Hare ran another step
+    Tortoise ran another step
+    Hare ran another step
+    Hare ran another step
+    Hare ran another step
+    Tortoise ran another step
+    Hare ran another step
+    Hare ran another step
+    Hare done running!
+    Tortoise ran another step
+    Tortoise ran another step
+    Tortoise ran another step
+    Tortoise ran another step
+    Tortoise ran another step
+    Tortoise ran another step
+    Tortoise done running!
+*/

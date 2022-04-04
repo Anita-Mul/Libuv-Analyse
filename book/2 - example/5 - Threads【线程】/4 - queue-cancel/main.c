@@ -65,3 +65,33 @@ int main() {
 
     return uv_run(loop, UV_RUN_DEFAULT);
 }
+
+/*
+    执行结果
+    0th fibonacci is 1
+    2th fibonacci is 2
+    3th fibonacci is 3
+    4th fibonacci is 5
+    5th fibonacci is 8
+    1th fibonacci is 1
+    8th fibonacci is 34
+    9th fibonacci is 55
+    6th fibonacci is 13
+    11th fibonacci is 144
+    7th fibonacci is 21
+    10th fibonacci is 89
+    13th fibonacci is 377
+    14th fibonacci is 610
+    12th fibonacci is 233
+    15th fibonacci is 987
+    16th fibonacci is 1597
+    17th fibonacci is 2584
+    18th fibonacci is 4181
+    20th fibonacci is 10946
+    22th fibonacci is 28657
+    23th fibonacci is 46368
+    19th fibonacci is 6765
+    21th fibonacci is 17711
+    24th fibonacci is 75025
+    ^CSignal received!
+*/

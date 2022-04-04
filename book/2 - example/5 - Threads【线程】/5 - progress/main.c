@@ -65,3 +65,25 @@ int main() {
 
     return uv_run(loop, UV_RUN_DEFAULT);
 }
+
+/*
+    Downloaded 0.00%
+    Downloaded 5.69%
+    Downloaded 6.53%
+    Downloaded 16.07%
+    Downloaded 17.20%
+    Downloaded 26.89%
+    Downloaded 32.12%
+    Downloaded 37.84%
+    Downloaded 44.60%
+    Downloaded 52.89%
+    Downloaded 58.96%
+    Downloaded 64.44%
+    Downloaded 66.66%
+    Downloaded 75.35%
+    Downloaded 77.88%
+    Downloaded 87.29%
+    Downloaded 88.52%
+    Downloaded 95.74%
+    Download complete
+*/

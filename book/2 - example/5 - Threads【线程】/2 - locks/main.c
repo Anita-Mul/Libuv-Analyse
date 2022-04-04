@@ -78,3 +78,188 @@ int main()
     uv_rwlock_destroy(&numlock);
     return 0;
 }
+
+
+/*
+    执行结果
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 1: acquired lock
+    Reader 1: shared num = 0
+    Reader 1: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Reader 2: acquired lock
+    Reader 2: shared num = 0
+    Reader 2: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 1
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 2
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 3
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 4
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 5
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 6
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 7
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 8
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 9
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 10
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 11
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 12
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 13
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 14
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 15
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 16
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 17
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 18
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 19
+    Writer 1: released lock
+    Writer 1: acquired lock
+    Writer 1: incremented shared num = 20
+    Writer 1: released lock
+*/
