@@ -79,3 +79,15 @@ int main()
     uv_thread_join(&thread2);
     return 0;
 }
+
+/*
+    运行结果：
+    PID 52570
+    之后终端输入 kill -s SIGUSR1 52570，结果
+
+    PID 52570
+    Signal received: 10
+    Signal received: 10
+    Signal received: 10
+    Signal received: 10
+*/

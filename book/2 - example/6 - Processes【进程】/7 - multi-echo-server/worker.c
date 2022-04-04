@@ -57,11 +57,13 @@ void on_new_connection(uv_stream_t *q, ssize_t nread, const uv_buf_t *buf) {
     }
 
     uv_pipe_t *pipe = (uv_pipe_t*) q;
+    // 调用uv_pipe_pending_count来确定从handle中可以读取出数据
     if (!uv_pipe_pending_count(pipe)) {
         fprintf(stderr, "No pending count\n");
         return;
     }
 
+    // 如果你的程序能够处理不同类型的handle，这时uv_pipe_pending_type就可以用来决定当前的类型
     uv_handle_type pending = uv_pipe_pending_type(pipe);
     assert(pending == UV_TCP);
 
@@ -81,7 +83,10 @@ void on_new_connection(uv_stream_t *q, ssize_t nread, const uv_buf_t *buf) {
 int main() {
     loop = uv_default_loop();
 
+    // queue是另一端连接上主进程的管道，因此，文件描述符可以传送过来。在uv_pipe_init中将ipc参数设置为1很关键，
+    // 因为它标明了这个管道将被用来做进程间通信
     uv_pipe_init(loop, &queue, 1 /* ipc */);
+    // 因为主进程需要把文件handle赋给了工人进程作为标准输入，因此我们使用uv_pipe_open把stdin作为pipe
     uv_pipe_open(&queue, 0);
     uv_read_start((uv_stream_t*)&queue, alloc_buffer, on_new_connection);
     return uv_run(loop, UV_RUN_DEFAULT);

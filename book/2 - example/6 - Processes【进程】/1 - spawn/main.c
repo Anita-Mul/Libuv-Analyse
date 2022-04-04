@@ -7,7 +7,7 @@ uv_loop_t *loop;
 uv_process_t child_req;
 /*
     由于上述的options是全局变量，因此被初始化为0。如果你在局部变量中定义options，请记得将所有没用的域设为0
-    在子进程开始执行前，你可以通过使用uv_process_options_t设置运行环境
+    v_process_options_t options = {0};
 */
 uv_process_options_t options;
 
@@ -37,6 +37,7 @@ int main() {
     options.args = args;
 
     int r;
+    // 初始化进程描述符并启动进程
     if ((r = uv_spawn(loop, &child_req, &options))) {
         fprintf(stderr, "%s\n", uv_strerror(r));
         return 1;
@@ -47,3 +48,9 @@ int main() {
 
     return uv_run(loop, UV_RUN_DEFAULT);
 }
+
+/*
+    执行结果
+    Launched process with ID 51777
+    Process exited with status 0, signal 0
+*/

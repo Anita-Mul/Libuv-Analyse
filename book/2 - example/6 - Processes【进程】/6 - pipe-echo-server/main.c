@@ -80,6 +80,7 @@ int main() {
     signal(SIGINT, remove_sock);
 
     int r;
+    // 我们把socket命名为echo.sock，意味着它将会在本地文件夹中被创造。对于stream API来说，本地socekt表现得和tcp的socket差不多
     if ((r = uv_pipe_bind(&server, "echo.sock"))) {
         fprintf(stderr, "Bind error %s\n", uv_err_name(r));
         return 1;
@@ -88,5 +89,6 @@ int main() {
         fprintf(stderr, "Listen error %s\n", uv_err_name(r));
         return 2;
     }
+
     return uv_run(loop, UV_RUN_DEFAULT);
 }

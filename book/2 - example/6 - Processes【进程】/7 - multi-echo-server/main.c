@@ -11,8 +11,10 @@
 
     为了展示这个功能，我们将来实现一个由循环中的工人进程处理client端请求，的这么一个echo服务器程序
 */
+
 uv_loop_t *loop;
 
+// child_worker结构包裹着进程，和连接主进程和各个独立进程的管道
 struct child_worker {
     uv_process_t req;
     uv_process_options_t options;
@@ -43,6 +45,7 @@ void on_new_connection(uv_stream_t *server, int status) {
 
     uv_tcp_t *client = (uv_tcp_t*) malloc(sizeof(uv_tcp_t));
     uv_tcp_init(loop, client);
+    // 接收了client端的socket，然后把它传递给worker环中的下一个可用的worker进程
     if (uv_accept(server, (uv_stream_t*) client) == 0) {
         uv_write_t *write_req = (uv_write_t*) malloc(sizeof(uv_write_t));
         dummy_buf = uv_buf_init("a", 1);
@@ -70,6 +73,7 @@ void setup_workers() {
     // ...
 
     // launch same number of workers as number of CPUs
+    // 使用 uv_cpu_info 函数获取到当前的 cpu 的核心个数，所以我们也能启动一样数目的worker进程
     uv_cpu_info_t *info;
     int cpu_count;
     uv_cpu_info(&info, &cpu_count);
@@ -78,15 +82,17 @@ void setup_workers() {
     child_worker_count = cpu_count;
 
     workers = calloc(sizeof(struct child_worker), cpu_count);
+    // worker进程被启动，等待着文件描述符被写入到他们的标准输入中
     while (cpu_count--) {
         struct child_worker *worker = &workers[cpu_count];
+        // 将uv_pipe_init的ipc参数设置为1，标准输出
         uv_pipe_init(loop, &worker->pipe, 1);
 
         uv_stdio_container_t child_stdio[3];
         child_stdio[0].flags = UV_CREATE_PIPE | UV_READABLE_PIPE;
         child_stdio[0].data.stream = (uv_stream_t*) &worker->pipe;
         child_stdio[1].flags = UV_IGNORE;
-        child_stdio[2].flags = UV_INHERIT_FD;
+        child_stdio[2].flags = UV_INHERIT_FD;        // 插入文件描述符
         child_stdio[2].data.fd = 2;
 
         worker->options.stdio = child_stdio;
@@ -96,6 +102,7 @@ void setup_workers() {
         worker->options.file = args[0];
         worker->options.args = args;
 
+        // 初始化进程描述符并且启动进程
         uv_spawn(loop, &worker->req, &worker->options); 
         fprintf(stderr, "Started worker %d\n", worker->req.pid);
     }
@@ -112,6 +119,7 @@ int main() {
     struct sockaddr_in bind_addr;
     uv_ip4_addr("0.0.0.0", 7000, &bind_addr);
     uv_tcp_bind(&server, (const struct sockaddr *)&bind_addr, 0);
+
     int r;
     if ((r = uv_listen((uv_stream_t*) &server, 128, on_new_connection))) {
         fprintf(stderr, "Listen error %s\n", uv_err_name(r));

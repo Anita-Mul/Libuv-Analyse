@@ -53,7 +53,7 @@ void invoke_cgi_script(uv_tcp_t *client) {
 
     uv_stdio_container_t child_stdio[3];
     child_stdio[0].flags = UV_IGNORE;
-    child_stdio[1].flags = UV_INHERIT_STREAM;
+    child_stdio[1].flags = UV_INHERIT_STREAM;                   // 子进程会把这个stream当成是标准的I/O
     child_stdio[1].data.stream = (uv_stream_t*) client;         // 重置孩子的输出缓冲区
     child_stdio[2].flags = UV_IGNORE;
 
