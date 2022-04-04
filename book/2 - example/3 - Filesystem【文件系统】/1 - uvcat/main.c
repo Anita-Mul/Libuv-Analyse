@@ -50,7 +50,7 @@ void on_open(uv_fs_t *req) {
     // The request passed to the callback is the same as the one the call setup
     // function was passed.
     assert(req == &open_req);
-    // req -> result 就是结果
+    
     if (req->result >= 0) {
         iov = uv_buf_init(buffer, sizeof(buffer));
         // uv_fs_t的result域保存了uv_fs_open回调函数打开的文件描述符

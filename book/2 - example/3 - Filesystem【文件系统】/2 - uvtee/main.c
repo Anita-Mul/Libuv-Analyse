@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
     uv_fs_t file_req;
     int fd = uv_fs_open(loop, &file_req, argv[1], O_CREAT | O_RDWR, 0644, NULL);
     uv_pipe_init(loop, &file_pipe, 0);
-    uv_pipe_open(&file_pipe, fd);               // 以 pipe 打开文件就是流的形式
+    uv_pipe_open(&file_pipe, fd);               // 以 pipe 打开文件就是流的形式【把管道和文件描述符关联起来】
 
     // 从标准输入读取数据
     // 当调用uv_read_start()后，我们开始监听stdin，当需要新的缓冲区来存储数据时，调用alloc_buffer，在函数read_stdin()中可以定义缓冲区中的数据处理操作
