@@ -69,15 +69,7 @@ void on_new_connection(uv_stream_t *server, int status) {
     }
 }
 
-/*
-    服务器端的建立流程如下：
 
-    1.uv_tcp_init建立tcp句柄。
-    2.uv_tcp_bind绑定。
-    3.uv_listen建立监听，当有新的连接到来时，激活调用回调函数。
-    4.uv_accept接收链接。
-    5.使用stream处理来和客户端通信。
-*/
 int main() {
     loop = uv_default_loop();
 
@@ -103,16 +95,3 @@ int main() {
 
     return uv_run(loop, UV_RUN_DEFAULT);
 }
-
-/*
-    客户端
-    uv_tcp_t* socket = (uv_tcp_t*)malloc(sizeof(uv_tcp_t));
-    uv_tcp_init(loop, socket);
-
-    uv_connect_t* connect = (uv_connect_t*)malloc(sizeof(uv_connect_t));
-
-    struct sockaddr_in dest;
-    uv_ip4_addr("127.0.0.1", 80, &dest);
-
-    uv_tcp_connect(connect, socket, dest, on_connect);
-*/
