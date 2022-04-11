@@ -27,14 +27,15 @@
 
 
 static struct heap *timer_heap(const uv_loop_t* loop) {
-#ifdef _WIN32
-  return (struct heap*) loop->timer_heap;
-#else
-  return (struct heap*) &loop->timer_heap;
-#endif
+  #ifdef _WIN32
+    return (struct heap*) loop->timer_heap;
+  #else
+    return (struct heap*) &loop->timer_heap;
+  #endif
 }
 
 
+// 两个节点的比较算法
 // 按 timeout 从小到大排序，如果时间相等，按 start_id 从小到大排序
 static int timer_less_than(const struct heap_node* ha,
                            const struct heap_node* hb) {
@@ -58,7 +59,9 @@ static int timer_less_than(const struct heap_node* ha,
 
 // 初始化uv_timer_t结构体
 int uv_timer_init(uv_loop_t* loop, uv_timer_t* handle) {
+  // 初始化 handle
   uv__handle_init(loop, (uv_handle_t*)handle, UV_TIMER);
+  // 初始化一些私有字段
   handle->timer_cb = NULL;
   handle->timeout = 0;
   handle->repeat = 0;
@@ -73,6 +76,7 @@ int uv_timer_start(uv_timer_t* handle,
                    uint64_t repeat) {
   uint64_t clamped_timeout;
 
+  // 如果这个计时器句柄是关闭的或者回调函数为 NULL
   if (uv__is_closing(handle) || cb == NULL)
     return UV_EINVAL;
 
@@ -81,6 +85,7 @@ int uv_timer_start(uv_timer_t* handle,
     uv_timer_stop(handle);
 
   // 超时时间，为绝对值
+  // handle->loop->time 是在 uv_run 中每一次 while 循环开始的时间
   clamped_timeout = handle->loop->time + timeout;
   if (clamped_timeout < timeout)
     clamped_timeout = (uint64_t) -1;
@@ -89,14 +94,14 @@ int uv_timer_start(uv_timer_t* handle,
   handle->timer_cb = cb;
   handle->timeout = clamped_timeout;
   handle->repeat = repeat;
-  /* start_id is the second index to be compared in timer_less_than() */
   handle->start_id = handle->loop->timer_counter++;
 
   // 插入最小堆
   heap_insert(timer_heap(handle->loop),
               (struct heap_node*) &handle->heap_node,
               timer_less_than);
-  // 激活该handle
+
+  // 激活该 handle
   uv__handle_start(handle);
 
   return 0;
@@ -111,6 +116,7 @@ int uv_timer_stop(uv_timer_t* handle) {
   heap_remove(timer_heap(handle->loop),
               (struct heap_node*) &handle->heap_node,
               timer_less_than);
+              
   // 清除激活状态和handle的active数减一
   uv__handle_stop(handle);
 
@@ -182,6 +188,7 @@ void uv__run_timers(uv_loop_t* loop) {
       break;
 
     handle = container_of(heap_node, uv_timer_t, heap_node);
+    // 每次取出的节点都是最小堆中最小的节点
     // 如果当前节点的时间大于当前时间则返回，说明后面的节点也没有超时
     if (handle->timeout > loop->time)
       break;

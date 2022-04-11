@@ -359,6 +359,7 @@ static int uv__loop_alive(const uv_loop_t* loop) {
 
     if (loop->closing_handles)
       return 0;
+      
     // 返回下一个最早过期的时间，即最早超时的节点
     return uv__next_timeout(loop);
   }
@@ -401,6 +402,7 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
   while (r != 0 && loop->stop_flag == 0) {
     // 更新时间并开始倒计时 loop->time
     uv__update_time(loop);
+    // 执行超时回调
     uv__run_timers(loop);
     // 处理挂起的handle
     ran_pending = uv__run_pending(loop);
@@ -410,17 +412,14 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
     uv__run_prepare(loop);
 
     timeout = 0;
+    // UV_RUN_ONCE 并且有 pending 节点的时候，会阻塞式 poll io，默认模式也是
     if ((mode == UV_RUN_ONCE && !ran_pending) || mode == UV_RUN_DEFAULT)
       timeout = uv__backend_timeout(loop);
 
     // 计算要阻塞的时间，开始阻塞
+    // poll io timeout 是 epoll_wait 的超时时间
     uv__io_poll(loop, timeout);
 
-    /* Run one final update on the provider_idle_time in case uv__io_poll
-     * returned because the timeout expired, but no events were received. This
-     * call will be ignored if the provider_entry_time was either never set (if
-     * the timeout == 0) or was already updated b/c an event was received.
-     */
     uv__metrics_update_idle_time(loop);
 
     // 程序执行到这里表示被唤醒了，被唤醒的原因可能是I/O可读可写、或者超时了，检查handle是否可以操作
@@ -429,15 +428,8 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
     uv__run_closing_handles(loop);
 
     // 单次模式 
+    // 还有一次执行超时回调的机会
     if (mode == UV_RUN_ONCE) {
-      /* UV_RUN_ONCE implies forward progress: at least one callback must have
-       * been invoked when it returns. uv__io_poll() can return without doing
-       * I/O (meaning: no callbacks) when its timeout expires - which means we
-       * have pending timers that satisfy the forward progress constraint.
-       *
-       * UV_RUN_NOWAIT makes no guarantees about progress so it's omitted from
-       * the check.
-       */
       uv__update_time(loop);
       uv__run_timers(loop);
     }
@@ -448,9 +440,6 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
       break;
   }
 
-  /* The if statement lets gcc compile it to a conditional store. Avoids
-   * dirtying a cache line.
-   */
   if (loop->stop_flag != 0)
     loop->stop_flag = 0;
 
@@ -891,10 +880,10 @@ void uv__io_init(uv__io_t* w, uv__io_cb cb, int fd) {
   // 当前感兴趣的事件，在再次执行 epoll 函数之前设置
   w->pevents = 0;
 
-#if defined(UV_HAVE_KQUEUE)
-  w->rcount = 0;
-  w->wcount = 0;
-#endif /* defined(UV_HAVE_KQUEUE) */
+  #if defined(UV_HAVE_KQUEUE)
+    w->rcount = 0;
+    w->wcount = 0;
+  #endif /* defined(UV_HAVE_KQUEUE) */
 }
 
 // 注册一个 io 观察到 libuv
@@ -910,16 +899,12 @@ void uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
   // 可能需要扩容
   maybe_resize(loop, w->fd + 1);
 
-#if !defined(__sun)
-  /* The event ports backend needs to rearm all file descriptors on each and
-   * every tick of the event loop but the other backends allow us to
-   * short-circuit here if the event mask is unchanged.
-   */
-  if (w->events == w->pevents)
-    return;
-#endif
+  #if !defined(__sun)
+    if (w->events == w->pevents)
+      return;
+  #endif
 
-  // io 观察者没有挂载在其他地方则插入 libuv 的 io 观察者队列
+  // io 观察者没有挂载在其他地方则插入 loop 的观察者队列
   if (QUEUE_EMPTY(&w->watcher_queue))
     QUEUE_INSERT_TAIL(&loop->watcher_queue, &w->watcher_queue);
 
@@ -931,6 +916,8 @@ void uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
 }
 
 // 撤销 io 观察者或者事件
+// uv__io_stop 修改 io 观察者感兴趣的事件，如果还有感兴趣的事件的话，io 观察者还
+// 会在队列里，否则移出
 void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
   assert(0 == (events & ~(POLLIN | POLLOUT | UV__POLLRDHUP | UV__POLLPRI)));
   assert(0 != events);
@@ -949,8 +936,9 @@ void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
 
   // 对所有事件都不感兴趣了
   if (w->pevents == 0) {
-    // 移出 io 观察者队列
+    // 移出 loop 的观察者队列
     QUEUE_REMOVE(&w->watcher_queue);
+
     // 重置
     QUEUE_INIT(&w->watcher_queue);
     w->events = 0;
@@ -961,8 +949,7 @@ void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
       loop->watchers[w->fd] = NULL;
       loop->nfds--;
     }
-  }
-  // 之前还没有插入 io 观察者队列，则插入，等到 poll io 时处理，否则不需要处理
+  }// 之前还没有插入 io 观察者队列，则插入，等到 poll io 时处理，否则不需要处理
   else if (QUEUE_EMPTY(&w->watcher_queue))
     QUEUE_INSERT_TAIL(&loop->watcher_queue, &w->watcher_queue);
 }

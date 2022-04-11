@@ -39,7 +39,7 @@ int uv_pipe_init(uv_loop_t* loop, uv_pipe_t* handle, int ipc) {
   return 0;
 }
 
-
+// name 是 unix 路径名称
 int uv_pipe_bind(uv_pipe_t* handle, const char* name) {
   struct sockaddr_un saddr;
   const char* pipe_fname;
@@ -48,18 +48,16 @@ int uv_pipe_bind(uv_pipe_t* handle, const char* name) {
 
   pipe_fname = NULL;
 
-  /* Already bound? */
   if (uv__stream_fd(handle) >= 0)
     return UV_EINVAL;
 
-  /* Make a copy of the file name, it outlives this function's scope. */
   pipe_fname = uv__strdup(name);
   if (pipe_fname == NULL)
     return UV_ENOMEM;
 
-  /* We've got a copy, don't touch the original any more. */
   name = NULL;
 
+  // unix 域套接字
   err = uv__socket(AF_UNIX, SOCK_STREAM, 0);
   if (err < 0)
     goto err_socket;
@@ -69,6 +67,7 @@ int uv_pipe_bind(uv_pipe_t* handle, const char* name) {
   uv__strscpy(saddr.sun_path, pipe_fname, sizeof(saddr.sun_path));
   saddr.sun_family = AF_UNIX;
 
+  // 绑定到路径，tcp 是绑定到 ip 和端口
   if (bind(sockfd, (struct sockaddr*)&saddr, sizeof saddr)) {
     err = UV__ERR(errno);
     /* Convert ENOENT to EACCES for compatibility with Windows. */
@@ -79,9 +78,10 @@ int uv_pipe_bind(uv_pipe_t* handle, const char* name) {
     goto err_socket;
   }
 
-  /* Success. */
+  // 已经绑定
   handle->flags |= UV_HANDLE_BOUND;
-  handle->pipe_fname = pipe_fname; /* Is a strdup'ed copy. */
+  handle->pipe_fname = pipe_fname; 
+  // 保存 socket fd，用于后面监听
   handle->io_watcher.fd = sockfd;
   return 0;
 
@@ -99,19 +99,20 @@ int uv__pipe_listen(uv_pipe_t* handle, int backlog, uv_connection_cb cb) {
     return UV_EINVAL;
 
 #if defined(__MVS__) || defined(__PASE__)
-  /* On zOS, backlog=0 has undefined behaviour */
-  /* On IBMi PASE, backlog=0 leads to "Connection refused" error */
   if (backlog == 0)
     backlog = 1;
   else if (backlog < 0)
     backlog = SOMAXCONN;
 #endif
-
+  // uv__stream_fd(handle)得到 bind 函数中获取的 socket
   if (listen(uv__stream_fd(handle), backlog))
     return UV__ERR(errno);
 
+  // 保存回调，有进程调用 connect 的时候时触发，由 uv__server_io 函数触发
   handle->connection_cb = cb;
+  // io 观察者的回调，有进程调用 connect 的时候时触发（io 观察者的 fd 在 init 函数里设置了）
   handle->io_watcher.cb = uv__server_io;
+  // 注册 io 观察者到 libuv，等待连接，即读事件到来
   uv__io_start(handle->loop, &handle->io_watcher, POLLIN);
   return 0;
 }
@@ -179,8 +180,11 @@ void uv_pipe_connect(uv_connect_t* req,
   int err;
   int r;
 
+  // 判断是否已经有 socket 了，没有的话需要申请一个，见下面
+  // #define uv__stream_fd(handle) ((handle)->io_watcher.fd)
   new_sock = (uv__stream_fd(handle) == -1);
 
+  // 客户端还没有对应的 socket fd
   if (new_sock) {
     err = uv__socket(AF_UNIX, SOCK_STREAM, 0);
     if (err < 0)
@@ -188,10 +192,12 @@ void uv_pipe_connect(uv_connect_t* req,
     handle->io_watcher.fd = err;
   }
 
+  // 需要连接的服务器信息。主要是 unix 域路径信息
   memset(&saddr, 0, sizeof saddr);
   uv__strscpy(saddr.sun_path, name, sizeof(saddr.sun_path));
   saddr.sun_family = AF_UNIX;
 
+  // 连接服务器，unix 域路径是 name
   do {
     r = connect(uv__stream_fd(handle),
                 (struct sockaddr*)&saddr, sizeof saddr);
@@ -211,18 +217,23 @@ void uv_pipe_connect(uv_connect_t* req,
     goto out;
   }
 
+  // 忽略错误处理逻辑
   err = 0;
+  // 设置 socket 的可读写属
   if (new_sock) {
     err = uv__stream_open((uv_stream_t*)handle,
-                          uv__stream_fd(handle),
+                          uv__stream_fd(handle),      // #define uv__stream_fd(handle) ((handle)->io_watcher.fd)
                           UV_HANDLE_READABLE | UV_HANDLE_WRITABLE);
   }
 
+  // 把 io 观察者注册到 libuv，等到连接成功或者可以发送请求
   if (err == 0)
     uv__io_start(handle->loop, &handle->io_watcher, POLLOUT);
 
 out:
+  // 记录错误码，如果有的话
   handle->delayed_error = err;
+  // 连接成功时的回调
   handle->connect_req = req;
 
   uv__req_init(handle->loop, req, UV_CONNECT);
@@ -230,7 +241,7 @@ out:
   req->cb = cb;
   QUEUE_INIT(&req->queue);
 
-  /* Force callback to run on next tick in case of error. */
+  // 如果连接出错，在 pending 节点会执行 req 对应的回调。错误码是 delayed_error
   if (err)
     uv__io_feed(handle->loop, &handle->io_watcher);
 

@@ -56,13 +56,12 @@
     return 0;                                                                 \
   }                                                                           \
   
-  /* 在每一轮循环中执行该函数，具体见uv_run */                                                                            \
+  /* 在每一轮循环中执行该函数，具体见uv_run */                                  \
   void uv__run_##name(uv_loop_t* loop) {                                      \
     uv_##name##_t* h;                                                         \
     QUEUE queue;                                                              \
     QUEUE* q;
-    /* 把loop的XXX_handles队列中所有节点摘下来挂载到queue变量 */ 
-    /* muduo 不就是借鉴了这里 */                                               \
+    /* 把loop的XXX_handles队列中所有节点摘下来挂载到queue变量 */                \
     QUEUE_MOVE(&loop->name##_handles, &queue);                                \
     /* while循环遍历队列，执行每个节点里面的函数 */
     while (!QUEUE_EMPTY(&queue)) {                                            \
@@ -79,7 +78,7 @@
     }                                                                         \
   }                                                                           \
   
-  /* 关闭这个idle handle */                                                                            \
+  /* 关闭这个idle handle */                                                   \
   void uv__##name##_close(uv_##name##_t* handle) {                            \
     uv_##name##_stop(handle);                                                 \
   }

@@ -285,9 +285,9 @@ typedef struct {
   uv_udp_send_cb send_cb;                                                     \
   uv_buf_t bufsml[4];                                                         \
 
-#define UV_HANDLE_PRIVATE_FIELDS                                              \
-  uv_handle_t* next_closing;      /* 指向下一个需要关闭的handle */                                            \
-  unsigned int flags;             /* 状态标记，比如引用、关闭、正在关闭、激活等状态 */                                            \
+#define UV_HANDLE_PRIVATE_FIELDS                                                        \
+  uv_handle_t* next_closing;      /* 指向下一个需要关闭的handle */                       \
+  unsigned int flags;             /* 状态标记，比如引用、关闭、正在关闭、激活等状态 */     \
 
 #define UV_STREAM_PRIVATE_FIELDS                                              \
   /* 其实 uv_connect_t 是一个请求，从前面的文章我们也知道，在libuv存在 handle 与 request，很明显connect_req就是一个请求，它的作用就是请求建立连接，比如类似建立tcp连接 */

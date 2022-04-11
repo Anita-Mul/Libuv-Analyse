@@ -429,20 +429,19 @@ struct uv_shutdown_s {
 };
 
 
-#define UV_HANDLE_FIELDS                                                      \
-  /* 公有数据，指向用户自定义数据，libuv不使用该成员 */                          \
-  void* data;                                                                 \
-  /* 只读数据 */                                                              \
-  uv_loop_t* loop;           /* 指向依赖的循环 */                              \
-  uv_handle_type type;       /* 句柄类型 */                                   \
-  /* private */                                                               \
-  uv_close_cb close_cb;      /* 句柄关闭时的回调函数 */                        \
-  void* handle_queue[2];     /* 句柄队列指针，分别指向上一个和下一个 */         \
-  union {                                                                     \
-    int fd;                                                                   \
-    void* reserved[4];                                                        \
-  } u;                                                                        \
-  UV_HANDLE_PRIVATE_FIELDS                                                    \
+#define UV_HANDLE_FIELDS                                                           \
+  void* data;                /* 公有数据，指向用户自定义数据，libuv不使用该成员 */    \                                                   \
+  /* 只读数据 */                                                                    \
+  uv_loop_t* loop;           /* 指向依赖的循环 */                                   \
+  uv_handle_type type;       /* 句柄类型 */                                        \
+  /* private */                                                                    \
+  uv_close_cb close_cb;      /* 句柄关闭时的回调函数 */                             \
+  void* handle_queue[2];     /* 句柄队列指针，分别指向上一个和下一个 */              \
+  union {                                                                          \
+    int fd;                                                                        \
+    void* reserved[4];                                                             \
+  } u;                                                                             \
+  UV_HANDLE_PRIVATE_FIELDS                                                         \
 
 /* The abstract base class of all handles. */
 struct uv_handle_s {

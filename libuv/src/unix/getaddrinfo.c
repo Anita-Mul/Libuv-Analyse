@@ -99,19 +99,22 @@ static void uv__getaddrinfo_work(struct uv__work* w) {
   uv_getaddrinfo_t* req;
   int err;
 
+  // 根据结构体的字段获取结构体首地址
   req = container_of(w, uv_getaddrinfo_t, work_req);
+  // 阻塞在这儿
   err = getaddrinfo(req->hostname, req->service, req->hints, &req->addrinfo);
   req->retcode = uv__getaddrinfo_translate_error(err);
 }
 
 
+// dns 解析完执行的函数
 static void uv__getaddrinfo_done(struct uv__work* w, int status) {
   uv_getaddrinfo_t* req;
 
   req = container_of(w, uv_getaddrinfo_t, work_req);
   uv__req_unregister(req->loop, req);
 
-  /* See initialization in uv_getaddrinfo(). */
+  // 释放初始化时申请的内存
   if (req->hints)
     uv__free(req->hints);
   else if (req->service)
@@ -125,22 +128,24 @@ static void uv__getaddrinfo_done(struct uv__work* w, int status) {
   req->service = NULL;
   req->hostname = NULL;
 
+  // 解析请求被用户取消了
   if (status == UV_ECANCELED) {
     assert(req->retcode == 0);
     req->retcode = UV_EAI_CANCELED;
   }
 
+  // 执行上层回调
   if (req->cb)
     req->cb(req, req->retcode, req->addrinfo);
 }
 
 
 int uv_getaddrinfo(uv_loop_t* loop,
-                   uv_getaddrinfo_t* req,
-                   uv_getaddrinfo_cb cb,
-                   const char* hostname,
-                   const char* service,
-                   const struct addrinfo* hints) {
+                   uv_getaddrinfo_t* req,           // 上层传进来的 req
+                   uv_getaddrinfo_cb cb,            // 解析完后的上层回调
+                   const char* hostname,            // 需要解析的名字
+                   const char* service,             // 查询的过滤条件：服务名。比如 http smtp，也可以是一个端口
+                   const struct addrinfo* hints) {  // 其他查询过滤条件
   char hostname_ascii[256];
   size_t hostname_len;
   size_t service_len;
@@ -179,6 +184,7 @@ int uv_getaddrinfo(uv_loop_t* loop,
 
   uv__req_init(loop, req, UV_GETADDRINFO);
   req->loop = loop;
+  // 设置请求的回调
   req->cb = cb;
   req->addrinfo = NULL;
   req->hints = NULL;
@@ -202,6 +208,7 @@ int uv_getaddrinfo(uv_loop_t* loop,
   if (hostname)
     req->hostname = memcpy(buf + len, hostname, hostname_len);
 
+  // 传了 cb 是异步
   if (cb) {
     uv__work_submit(loop,
                     &req->work_req,
@@ -210,6 +217,7 @@ int uv_getaddrinfo(uv_loop_t* loop,
                     uv__getaddrinfo_done);
     return 0;
   } else {
+    // 阻塞式查询，然后执行回调
     uv__getaddrinfo_work(&req->work_req);
     uv__getaddrinfo_done(&req->work_req, 0);
     return req->retcode;

@@ -133,6 +133,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int user_timeout;
   int reset_timeout;
 
+  // 没有 io 观察者，则直接返回 
   if (loop->nfds == 0) {
     assert(QUEUE_EMPTY(&loop->watcher_queue));
     return;
@@ -155,19 +156,22 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     assert(w->fd >= 0);
     assert(w->fd < (int) loop->nwatchers);
 
+
+    // ————————————————————  根据 uv__io_t 句柄初始化 epoll_event 结构体 ————————————————————
     // 设置当前感兴趣的事件
     e.events = w->pevents;
     // 这里使用了fd字段，事件触发后再通过fd从watchs字段里找到对应的io观察者，没有使用ptr指向io观察者的方案
     e.data.fd = w->fd;
+
+
+    // ———————————————————— 判断事件类型 ————————————————————
     // w->events初始化的时候为0，则新增，否则修改
     if (w->events == 0)
       op = EPOLL_CTL_ADD;
     else
       op = EPOLL_CTL_MOD;
 
-    /* XXX Future optimization: do EPOLL_CTL_MOD lazily if we stop watching
-     * events, skip the syscall and squelch the events after epoll_wait().
-     */
+    // ———————————————————— 调用 epoll_ctl 来修改文件描述符上的事件 ————————————————————
     if (epoll_ctl(loop->backend_fd, op, w->fd, &e)) {
       if (errno != EEXIST)
         abort();
@@ -175,6 +179,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       assert(op == EPOLL_CTL_ADD);
 
       /* We've reactivated a file descriptor that's been watched before. */
+      // 重新激活以前被监视过的文件描述符
       if (epoll_ctl(loop->backend_fd, EPOLL_CTL_MOD, w->fd, &e))
         abort();
     }
@@ -183,15 +188,13 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     w->events = w->pevents;
   }
 
+
+  // ———————————————————— 屏蔽SIGPROF信号，避免SIGPROF信号唤醒epoll_wait，但是却没有就绪的事件 ————————————————————
   /*
     如果设置了UV_LOOP_BLOCK_SIGPROF的话。libuv会做一个优化。如果调setitimer(ITIMER_PROF,…)设置了定时触发SIGPROF信号，
-    则到期后，并且每隔一段时间后会触发SIGPROF信号，这里如果设置了UV_LOOP_BLOCK_SIGPROF救护屏蔽这个信号。否则会提前唤
+    则到期后，并且每隔一段时间后会触发SIGPROF信号，这里如果设置了UV_LOOP_BLOCK_SIGPROF就会屏蔽这个信号。否则会提前唤
     醒epoll_wait
     http://man7.org/linux/man-pages/man2/epoll_wait.2.html
-    pthread_sigmask(SIG_SETMASK, &sigmask, &origmask);
-    ready = epoll_wait(epfd, &events, maxevents, timeout);
-    pthread_sigmask(SIG_SETMASK, &origmask, NULL);
-    即屏蔽SIGPROF信号，避免SIGPROF信号唤醒epoll_wait，但是却没有就绪的事件
   */
   sigmask = 0;
   if (loop->flags & UV_LOOP_BLOCK_SIGPROF) {
@@ -200,10 +203,11 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     sigmask |= 1 << (SIGPROF - 1);
   }
 
+
   assert(timeout >= -1);
-  base = loop->time;
-  count = 48; /* Benchmarks suggest this gives the best throughput. */
-  real_timeout = timeout;
+  base = loop->time;          // 循环开始的时间
+  count = 48; 
+  real_timeout = timeout;     // 超时时间
 
   if (uv__get_internal_fields(loop)->flags & UV_METRICS_IDLE_TIME) {
     reset_timeout = 1;
@@ -214,25 +218,13 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     user_timeout = 0;
   }
 
-  /* You could argue there is a dependency between these two but
-   * ultimately we don't care about their ordering with respect
-   * to one another. Worst case, we make a few system calls that
-   * could have been avoided because another thread already knows
-   * they fail with ENOSYS. Hardly the end of the world.
-   */
   no_epoll_pwait = uv__load_relaxed(&no_epoll_pwait_cached);
   no_epoll_wait = uv__load_relaxed(&no_epoll_wait_cached);
 
   for (;;) {
-    /* Only need to set the provider_entry_time if timeout != 0. The function
-     * will return early if the loop isn't configured with UV_METRICS_IDLE_TIME.
-     */
     if (timeout != 0)
       uv__metrics_set_provider_entry_time(loop);
 
-    /* See the comment for max_safe_timeout for an explanation of why
-     * this is necessary.  Executive summary: kernel bug workaround.
-     */
     if (sizeof(int32_t) == sizeof(long) && timeout >= max_safe_timeout)
       timeout = max_safe_timeout;
 
@@ -240,6 +232,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       if (pthread_sigmask(SIG_BLOCK, &sigset, NULL))
         abort();
 
+    // ———————————————————— 调用 epoll wait 来监控文件描述符上事件的产生 ————————————————————
     if (no_epoll_wait != 0 || (sigmask != 0 && no_epoll_pwait == 0)) {
       nfds = epoll_pwait(loop->backend_fd,
                          events,
@@ -265,11 +258,10 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       if (pthread_sigmask(SIG_UNBLOCK, &sigset, NULL))
         abort();
 
-    /* Update loop->time unconditionally. It's tempting to skip the update when
-     * timeout == 0 (i.e. non-blocking poll) but there is no guarantee that the
-     * operating system didn't reschedule our process while in the syscall.
-     */
+    // ———————————————————— epoll 可能阻塞，这里需要更新事件循环的时间 ————————————————————
     SAVE_ERRNO(uv__update_time(loop));
+
+
 
     if (nfds == 0) {
       assert(timeout != -1);

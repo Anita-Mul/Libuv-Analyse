@@ -56,6 +56,7 @@ void on_resolved(uv_getaddrinfo_t *resolver, int status, struct addrinfo *res) {
 
     uv_tcp_connect(connect_req, socket, (const struct sockaddr*) res->ai_addr, on_connect);
 
+    // 释放结构 addrinfo
     uv_freeaddrinfo(res);
 }
 
