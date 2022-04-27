@@ -52,8 +52,8 @@ void on_resolved(uv_getaddrinfo_t *resolver, int status, struct addrinfo *res) {
 
     uv_connect_t *connect_req = (uv_connect_t*) malloc(sizeof(uv_connect_t));
     uv_tcp_t *socket = (uv_tcp_t*) malloc(sizeof(uv_tcp_t));
+    
     uv_tcp_init(loop, socket);
-
     uv_tcp_connect(connect_req, socket, (const struct sockaddr*) res->ai_addr, on_connect);
 
     // 释放结构 addrinfo

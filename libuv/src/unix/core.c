@@ -249,14 +249,6 @@ int uv__getiovmax(void) {
 static void uv__finish_close(uv_handle_t* handle) {
   uv_signal_t* sh;
 
-  /* Note: while the handle is in the UV_HANDLE_CLOSING state now, it's still
-   * possible for it to be active in the sense that uv__is_active() returns
-   * true.
-   *
-   * A good example is when the user calls uv_shutdown(), immediately followed
-   * by uv_close(). The handle is considered active at this point because the
-   * completion of the shutdown req is still pending.
-   */
   assert(handle->flags & UV_HANDLE_CLOSING);
   assert(!(handle->flags & UV_HANDLE_CLOSED));
   handle->flags |= UV_HANDLE_CLOSED;
@@ -274,11 +266,6 @@ static void uv__finish_close(uv_handle_t* handle) {
       break;
 
     case UV_SIGNAL:
-      /* If there are any caught signals "trapped" in the signal pipe,
-       * we can't call the close callback yet. Reinserting the handle
-       * into the closing queue makes the event loop spin but that's
-       * okay because we only need to deliver the pending events.
-       */
       sh = (uv_signal_t*) handle;
       if (sh->caught_signals > sh->dispatched_signals) {
         handle->flags ^= UV_HANDLE_CLOSED;
@@ -343,7 +330,7 @@ static int uv__loop_alive(const uv_loop_t* loop) {
          loop->closing_handles != NULL;
 }
 
-/*
+
   int uv_backend_timeout(const uv_loop_t* loop) {
     // 下面几种情况下返回0，即不阻塞在epoll_wait 
     if (loop->stop_flag != 0)
@@ -363,7 +350,7 @@ static int uv__loop_alive(const uv_loop_t* loop) {
     // 返回下一个最早过期的时间，即最早超时的节点
     return uv__next_timeout(loop);
   }
-*/
+
 // 当还存在idle handle处于活跃状态时，事件循环将不会进入阻塞状态的，或者说循环将执行零超时轮询
 static int uv__backend_timeout(const uv_loop_t* loop) {
   if (loop->stop_flag == 0 &&
@@ -412,7 +399,7 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
     uv__run_prepare(loop);
 
     timeout = 0;
-    // UV_RUN_ONCE 并且有 pending 节点的时候，会阻塞式 poll io，默认模式也是
+    // UV_RUN_ONCE 并且没有 pending 节点的时候，会阻塞式 poll io，默认模式也是
     if ((mode == UV_RUN_ONCE && !ran_pending) || mode == UV_RUN_DEFAULT)
       timeout = uv__backend_timeout(loop);
 
@@ -436,6 +423,7 @@ int uv_run(uv_loop_t* loop, uv_run_mode mode) {
 
     // handle保活处理
     r = uv__loop_alive(loop);
+    
     if (mode == UV_RUN_ONCE || mode == UV_RUN_NOWAIT)
       break;
   }

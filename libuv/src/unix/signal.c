@@ -64,12 +64,7 @@ static void uv__signal_global_reinit(void);
 
 static void uv__signal_global_init(void) {
   if (uv__signal_lock_pipefd[0] == -1)
-    /* pthread_atfork can register before and after handlers, one
-     * for each child. This only registers one for the child. That
-     * state is both persistent and cumulative, so if we keep doing
-     * it the handler functions will be called multiple times. Thus
-     * we only want to do it once.
-     */
+    // 注册 fork 之后，在子进程执行的函数
     if (pthread_atfork(NULL, NULL, &uv__signal_global_reinit))
       abort();
 
@@ -98,11 +93,14 @@ void uv__signal_cleanup(void) {
 
 
 static void uv__signal_global_reinit(void) {
+  // 清除原来的（如果有的话）
   uv__signal_cleanup();
 
+  // 新建一个管道用于互斥控制
   if (uv__make_pipe(uv__signal_lock_pipefd, 0))
     abort();
 
+  // 先往管道写入数据，即解锁。后续才能顺利 lock，unlock 配对使用
   if (uv__signal_unlock())
     abort();
 }
@@ -188,6 +186,7 @@ static void uv__signal_handler(int signum) {
   saved_errno = errno;
   memset(&msg, 0, sizeof msg);
 
+  // 保持上一个系统调用的错误码
   if (uv__signal_lock()) {
     errno = saved_errno;
     return;
@@ -202,10 +201,6 @@ static void uv__signal_handler(int signum) {
     msg.signum = signum;
     msg.handle = handle;
 
-    /* write() should be atomic for small data chunks, so the entire message
-     * should be written at once. In theory the pipe could become full, in
-     * which case the user is out of luck.
-     */
     /* 往signal_pipefd管道写入数据，就是通知libuv，拿些signal handle需要处理信号，这是在事件循环中处理的 */
     do {
       r = write(handle->loop->signal_pipefd[1], &msg, sizeof msg);
@@ -225,20 +220,22 @@ static void uv__signal_handler(int signum) {
 
 
 static int uv__signal_register_handler(int signum, int oneshot) {
-  /* When this function is called, the signal lock must be held. */
   struct sigaction sa;
 
-  /* XXX use a separate signal stack? */
   memset(&sa, 0, sizeof(sa));
+  // 全置一，说明收到 signum 信号的时候，暂时屏蔽其他信号
   if (sigfillset(&sa.sa_mask))
     abort();
-  /* 注册回调函数uv__signal_handler */
+
+  // 所有信号都由该函数处理
   sa.sa_handler = uv__signal_handler;
   sa.sa_flags = SA_RESTART;
+
+  // 设置了 oneshot，说明信号处理函数只执行一次，然后被恢复为系统的默认处理函数
   if (oneshot)
     sa.sa_flags |= SA_RESETHAND;
 
-  /* XXX save old action so we can restore it later on? */
+  // 注册
   if (sigaction(signum, &sa, NULL))
     return UV__ERR(errno);
 
@@ -261,16 +258,23 @@ static void uv__signal_unregister_handler(int signum) {
     abort();
 }
 
-/* 申请和libuv的通信管道并且注册io观察者 */
+/*
+  此代码主要的工作有两个
+      1 申请一个管道，用于其他进程（libuv 进程或 fork 出来的进程）和 libuv 进程通信。
+      然后往 libuv 的 io 观察者队列注册一个观察者，libuv 在 poll io 阶段会把观察者加到
+      epoll 中。io 观察者里保存了管道读端的文件描述符 loop->signal_pipefd[0]和回调函
+      数 uv__signal_event。uv__signal_event 是任意信号触发时的回调，他会继续根据触
+      发的信号进行逻辑分发。
+      2 初始化信号信号 handle 的字段。
+*/
 static int uv__signal_loop_once_init(uv_loop_t* loop) {
   int err;
 
-  /* Return if already initialized. */
   /* 如果已经初始化则返回 */
   if (loop->signal_pipefd[0] != -1)
     return 0;
 
-  /* 申请两个管道，用于其他进程和libuv主进程通信，并设置非阻塞标记 */
+  // 申请一个管道，用于其他进程和 libuv 主进程通信，并设置非阻塞标记
   err = uv__make_pipe(loop->signal_pipefd, UV_NONBLOCK_PIPE);
   if (err)
     return err;
@@ -376,26 +380,16 @@ static int uv__signal_start(uv_signal_t* handle,
 
   assert(!uv__is_closing(handle));
 
-  /* If the user supplies signum == 0, then return an error already. If the
-   * signum is otherwise invalid then uv__signal_register will find out
-   * eventually.
-   */
-  /* 如果用户提供的signum == 0，则返回错误。 */ 
+  /* 如果用户提供的 signum == 0，则返回错误。 */ 
   if (signum == 0)
     return UV_EINVAL;
 
-  /* Short circuit: if the signal watcher is already watching {signum} don't
-   * go through the process of deregistering and registering the handler.
-   * Additionally, this avoids pending signals getting lost in the small
-   * time frame that handle->signum == 0.
-   */
   /* 这个信号已经注册过了，重新设置回调处理函数就行。 */
   if (signum == handle->signum) {
     handle->signal_cb = signal_cb;
     return 0;
   }
 
-  /* If the signal handler was already active, stop it first. */
   /* 如果信号处理程序已经处于活动状态，请先停止它。 */
   if (handle->signum != 0) {
     uv__signal_stop(handle);
@@ -404,14 +398,27 @@ static int uv__signal_start(uv_signal_t* handle,
   /* 暂时屏蔽所有信号 */
   uv__signal_block_and_lock(&saved_sigmask);
 
-  /* If at this point there are no active signal watchers for this signum (in
-   * any of the loops), it's time to try and register a handler for it here.
-   * Also in case there's only one-shot handlers and a regular handler comes in.
-   */
-  /* 如果此时没有用于该信号的活动信号监视程序（在任何循环中），则给进程注册一个信号和信号处理函数。主要是调用操作系统的sigaction()函数来处理的。 */
+  /*
+      注册了该信号的第一个 handle，
+      优先返回设置了 UV_SIGNAL_ONE_SHOT flag 的，
+      见 compare 函数
+  */
   first_handle = uv__signal_first_handle(signum);
+
+  /* 
+      1 之前没有注册过该信号的处理函数则直接设置
+
+      2 之前设置过，但是是 one shot，但是现在需要
+      设置的规则不是 one shot，需要修改。否则第
+      二次不会不会触发。因为一个信号只能对应一
+      个信号处理函数，所以，以规则宽的为准备，在回调
+      里再根据 flags 判断是不是真的需要执行
+
+      3 如果注册过信号和处理函数，则直接插入红黑树就行。
+  */ 
   if (first_handle == NULL ||
       (!oneshot && (first_handle->flags & UV_SIGNAL_ONE_SHOT))) {
+    // 注册信号和处理函数
     err = uv__signal_register_handler(signum, oneshot);
     if (err) {
       /* Registering the signal handler failed. Must be an invalid signal. */
@@ -421,6 +428,7 @@ static int uv__signal_start(uv_signal_t* handle,
     }
   }
 
+  // 记录感兴趣的信号
   handle->signum = signum;
   /* 设置UV_SIGNAL_ONE_SHOT标记，表示libuv只响应一次信号 */
   if (oneshot)
@@ -432,6 +440,7 @@ static int uv__signal_start(uv_signal_t* handle,
   /* 接触屏蔽信号 */
   uv__signal_unlock_and_unblock(&saved_sigmask);
 
+  // 信号触发时的业务层回调
   handle->signal_cb = signal_cb;
   /* 设置handle的标志UV_HANDLE_ACTIVE，表示处于活跃状态 */
   uv__handle_start(handle);
@@ -440,10 +449,10 @@ static int uv__signal_start(uv_signal_t* handle,
 }
 
 /*
-在信号通知完成后，事件循环中管道读取数据段有消息到达，此时事件循环将接收到消息，接下来在libuv的poll io阶段才做真正的处理。
-从uv__io_init()函数的处理过程得知，它把管道的读取端loop->signal_pipefd[0]看作是一个io观察者，在poll io阶段，epoll会检
-测到管道loop->signal_pipefd[0]是否可读，如果可读，然后会执行uv__signal_event()函数。在这个uv__signal_event()函数中，
-libuv将从管道读取刚才写入的一个个msg，从msg中取出对应的handle，然后执行里面保存的回调函数
+  在信号通知完成后，事件循环中管道读取数据段有消息到达，此时事件循环将接收到消息，接下来在libuv的poll io阶段才做真正的处理。
+  从uv__io_init()函数的处理过程得知，它把管道的读取端loop->signal_pipefd[0]看作是一个io观察者，在poll io阶段，epoll会检
+  测到管道loop->signal_pipefd[0]是否可读，如果可读，然后会执行uv__signal_event()函数。在这个uv__signal_event()函数中，
+  libuv将从管道读取刚才写入的一个个msg，从msg中取出对应的handle，然后执行里面保存的回调函数
 */
 static void uv__signal_event(uv_loop_t* loop,
                              uv__io_t* w,
@@ -506,9 +515,7 @@ static void uv__signal_event(uv_loop_t* loop,
 
     bytes -= end;
 
-    /* If there are any "partial" messages left, move them to the start of the
-     * the buffer, and spin. This should not happen.
-     */
+    // 处理完了关闭
     if (bytes) {
       memmove(buf, buf + end, bytes);
       continue;
@@ -598,4 +605,21 @@ static void uv__signal_stop(uv_signal_t* handle) {
 
   handle->signum = 0;
   uv__handle_stop(handle);
+}
+
+
+
+
+struct uv_handle_s {
+    void* data;                                 /* 公有数据，指向用户自定义数据，libuv不使用该成员 */
+    uv_loop_t* loop;                            /* 所属事件循环 */
+    uv_handle_type type;                        /* handle 类型 */
+    uv_close_cb close_cb;                       /* 关闭 handle 时的回调 */
+    void* handle_queue[2];                      /* 用于插入事件循环的 handle 队列 */
+    union {                                                                     
+      int fd;                                                                   
+      void* reserved[4];                                                        
+    } u; 
+    uv_handle_t* next_closing;                  /* 指向下一个需要关闭的handle */
+    unsigned int flags;                         /* 状态标记，比如引用、关闭、正在关闭、激活等状态 */
 }

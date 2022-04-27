@@ -521,3 +521,57 @@ typedef struct {
 #define UV_FS_O_TEMPORARY     0
 
 #endif /* UV_UNIX_H */
+
+
+struct uv_loop_s {
+  void* data;                                             // 用户数据-可以用于任何用途，libuv是不会触碰这个字段的数据的
+  unsigned int active_handles;                            // 活跃的 handle 个数
+  void* handle_queue[2];                                  // handle队列是一个双向链表，而数组中这两个元素则分别指向next和prev
+  union {
+    void* unused;                                         // 这是未使用的东西，主要是防止uv_loop_s结构体大小被改变了
+    unsigned int count;                                   // 这才是真正使用的东西，用来对在线程池中调用的异步I/O进行计数
+  } active_reqs;					                                // request 个数（主要用于文件操作）
+  void* internal_fields;
+  unsigned int stop_flag;                                 // 事件循环是否结束的标记
+  
+  unsigned long flags;                                    // libuv 运行的一些标记，目前只有 UV_LOOP_BLOCK_SIGPROF，主要是用于 epoll_wait
+							                                            // 的时候屏蔽 SIGPROF 信号，提高性能，SIGPROF 是调操作系统 settimer 函数设置从
+							                                            // 而触发的信号                    
+  int backend_fd;                                         // epoll 的 fd                     
+  void* pending_queue[2];                                 // pending 阶段的队列                    
+  void* watcher_queue[2];                                 // watcher_queue 是 uv__io_t 的观察者队列，其中保存的是 uv__io_t 的结构体                    
+  uv__io_t** watchers;                                    // watcher_queue 队列的节点中有一个 fd 字段，watchers 以 fd 为索引，记录 fd 所在
+							                                            // 的 uv__io_t 结构体                    
+  unsigned int nwatchers;                                 // watchers 相关的数量，在 maybe_resize 函数里设置                    
+  unsigned int nfds;                                      // watchers 里 fd 个数，一般为 watcher_queue 队列的节点数                    
+  void* wq[2];                                            // 线程池的线程处理完任务后把对应的结构体插入到 wq 队列                    
+  uv_mutex_t wq_mutex;					                          // 控制 wq 队列互斥访问	
+  uv_async_t wq_async;                                    // 用于线程池和主线程通信                    
+  uv_rwlock_t cloexec_lock;                               // 用于读写锁的互斥变量                   
+  uv_handle_t* closing_handles;                           // closing 阶段的队列。由 uv_close 产生                    
+  void* process_handles[2];                               // fork 出来的进程队列                   
+  void* prepare_handles[2];                               // libuv 的 prepare 阶段对应的任务队列                   
+  void* check_handles[2];                                 // libuv 的 check 阶段对应的任务队列                   
+  void* idle_handles[2];                                  // libuv 的 idle 阶段对应的任务队列                    
+  void* async_handles[2];                                 // async_handles 队列，在线程池中发送就绪信号给主线程的时候，主线程在 poll io 阶
+							                                            // 段执行 uv__async_io 中遍历 async_handles 队列处理里面 pending 为 1 的节点。                    
+  void (*async_unused)(void);      			  
+  uv__io_t async_io_watcher;                              // 保存了线程通信管道的读端和回调，用于接收线程池的消息，调用 uv__async_io 回调处理 async_handle 队列的节点                    
+  int async_wfd;                                          // 用于保存线程池和主线程通信的写端 fd                    
+  struct {                                                                    
+    void* min;                                                                
+    unsigned int nelts;                                                       
+  } timer_heap;                                           // 保存定时器二叉堆结构                    
+  uint64_t timer_counter;                                 // 管理定时器节点的 id，不断叠加                  
+  uint64_t time;                                          // 当前时间，Libuv 会在每次事件循环的开始和 poll io 阶段会更新当前时间，然后在后
+							                                            // 续的各个阶段使用，减少对系统调用                   
+  int signal_pipefd[2];                                   // 用于 fork 出来的进程和主进程通信的管道，用于非主进程收到信号的时候通知主进程，
+							                                            // 然后主进程执行非主进程节点注册的回调                    
+  uv__io_t signal_io_watcher;                             
+  uv_signal_t child_watcher;				                      // 类似 async_handle，signal_io_watcher 保存了管道读端 fd 和回调，然后注册到 epoll
+							                                            // 中，在非主进程收到信号的时候，通过 write 写到管道，最后在 poll io 阶段执行回
+							                                            // 调。                    
+                                                    
+  int emfile_fd;                                          // 备用的 fd                    
+};
+

@@ -53,6 +53,7 @@ void on_new_connection(uv_stream_t *server, int status) {
 
     uv_pipe_t *client = (uv_pipe_t*) malloc(sizeof(uv_pipe_t));
     uv_pipe_init(loop, client, 0);
+    
     if (uv_accept(server, (uv_stream_t*) client) == 0) {
         uv_read_start((uv_stream_t*) client, alloc_buffer, echo_read);
     }
@@ -85,6 +86,7 @@ int main() {
         fprintf(stderr, "Bind error %s\n", uv_err_name(r));
         return 1;
     }
+
     if ((r = uv_listen((uv_stream_t*) &server, 128, on_new_connection))) {
         fprintf(stderr, "Listen error %s\n", uv_err_name(r));
         return 2;

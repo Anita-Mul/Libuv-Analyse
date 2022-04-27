@@ -97,6 +97,7 @@ int uv_loop_init(uv_loop_t* loop) {
 
   uv__handle_unref(&loop->child_watcher);
   loop->child_watcher.flags |= UV_HANDLE_INTERNAL;
+
   QUEUE_INIT(&loop->process_handles);
 
   // 初始化线程读写锁

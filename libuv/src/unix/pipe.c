@@ -207,10 +207,6 @@ void uv_pipe_connect(uv_connect_t* req,
   if (r == -1 && errno != EINPROGRESS) {
     err = UV__ERR(errno);
 #if defined(__CYGWIN__) || defined(__MSYS__)
-    /* EBADF is supposed to mean that the socket fd is bad, but
-       Cygwin reports EBADF instead of ENOTSOCK when the file is
-       not a socket.  We do not expect to see a bad fd here
-       (e.g. due to new_sock), so translate the error.  */
     if (err == UV_EBADF)
       err = UV_ENOTSOCK;
 #endif

@@ -75,6 +75,7 @@ void uv__stream_init(uv_loop_t* loop,
 
   // 调用uv__handle_init()函数将stream handle初始化，主要设置loop、类型、以及UV_HANDLE_REF标记
   uv__handle_init(loop, (uv_handle_t*)stream, type);
+
   // 初始化stream handle中的成员变量
   stream->read_cb = NULL;
   stream->alloc_cb = NULL;
@@ -85,11 +86,14 @@ void uv__stream_init(uv_loop_t* loop,
   stream->accepted_fd = -1;
   stream->queued_fds = NULL;
   stream->delayed_error = 0;
+
   // 初始化write_queue与write_completed_queue队列
   QUEUE_INIT(&stream->write_queue);
   QUEUE_INIT(&stream->write_completed_queue);
   stream->write_queue_size = 0;
 
+  // 这个逻辑看起来是为了拿到一个备用的文件描述符，如果以后触发 UV_EMFILE 错
+  // 误（打开的文件太多）时，使用这个备用的 fd
   if (loop->emfile_fd == -1) {
     err = uv__open_cloexec("/dev/null", O_RDONLY);
     if (err < 0)
@@ -104,7 +108,8 @@ void uv__stream_init(uv_loop_t* loop,
 #if defined(__APPLE__)
   stream->select = NULL;
 #endif /* defined(__APPLE_) */
-  // 调用uv__io_init()函数去初始化io观察者，并设置stream的回调处理函数uv__stream_io()
+  // 初始化 io 观察者，把文件描述符（这里还没有，所以是-1）和回调 uv__stream_io
+  // 记录在 io_watcher 上
   uv__io_init(&stream->io_watcher, uv__stream_io, -1);
 }
 
@@ -392,22 +397,26 @@ failed_malloc:
 #endif /* defined(__APPLE__) */
 
 
+// 关闭 nagle，开启长连接，保存 fd 
 int uv__stream_open(uv_stream_t* stream, int fd, int flags) {
 #if defined(__APPLE__)
   int enable;
 #endif
 
+  // 还没有设置 fd 或者设置的同一个 fd 则继续，否则返回 busy
   if (!(stream->io_watcher.fd == -1 || stream->io_watcher.fd == fd))
     return UV_EBUSY;
 
   assert(fd >= 0);
+  // 设置流的标记
   stream->flags |= flags;
 
   if (stream->type == UV_TCP) {
+    // 关闭 nagle 算法
     if ((stream->flags & UV_HANDLE_TCP_NODELAY) && uv__tcp_nodelay(fd, 1))
       return UV__ERR(errno);
 
-    /* TODO Use delay the user passed in. */
+    // 开启 SO_KEEPALIVE，使用 tcp 长连接，一定时间后没有收到数据包会发送心跳包
     if ((stream->flags & UV_HANDLE_TCP_KEEPALIVE) &&
         uv__tcp_keepalive(fd, 1, 60)) {
       return UV__ERR(errno);
@@ -423,6 +432,7 @@ int uv__stream_open(uv_stream_t* stream, int fd, int flags) {
   }
 #endif
 
+  // 保存 socket 对应的文件描述符到 io 观察者中，libuv 会在 io poll 阶段监听该文件描述符
   stream->io_watcher.fd = fd;
 
   return 0;
@@ -513,16 +523,26 @@ static int uv__emfile_trick(uv_loop_t* loop, int accept_fd) {
 # define UV_DEC_BACKLOG(w) /* no-op */
 #endif /* defined(UV_HAVE_KQUEUE) */
 
-
+/*
+1 调用 accept 摘下一个完成了三次握手的节点。
+2 然后执行上层回调。上层回调会调用 uv_accept 消费 accept 返回的 fd。
+  然后再次注册等待可读事件（当然也可以不消费）。
+3 如果 2 没有消费调 fd。则撤销等待可读事件，即处理完一个 fd 后，再 accept
+  下 一 个 。 如 果 2 中 消 费 了 fd 。 再 判 断 有 没 有 设 置
+  UV_HANDLE_TCP_SINGLE_ACCEPT 标记，如果有则休眠一会，分点给别的
+  进程 accept。否则继续 accept。
+*/
 void uv__server_io(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
   uv_stream_t* stream;
   int err;
 
+  // 拿到 io 观察者所在的流
   stream = container_of(w, uv_stream_t, io_watcher);
   assert(events & POLLIN);
   assert(stream->accepted_fd == -1);
   assert(!(stream->flags & UV_HANDLE_CLOSING));
 
+  // 继续注册事件,等待连接
   uv__io_start(stream->loop, &stream->io_watcher, POLLIN);
 
   /* connection_cb can close the server socket while we're
@@ -536,8 +556,11 @@ void uv__server_io(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
       return;
 #endif /* defined(UV_HAVE_KQUEUE) */
 
+    // 有连接到来，进行 accept
     err = uv__accept(uv__stream_fd(stream));
     if (err < 0) {
+      // 忽略出错处理
+      // accept 出错，触发回调
       if (err == UV_EAGAIN || err == UV__ERR(EWOULDBLOCK))
         return;  /* Not an error. */
 
@@ -555,15 +578,26 @@ void uv__server_io(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
     }
 
     UV_DEC_BACKLOG(w)
+    // 保存通信 socket 对应的文件描述符
     stream->accepted_fd = err;
+    /*
+        有连接，执行上层回调，connection_cb 一般会调用 uv_accept 消费
+        accepted_fd。
+        然后重新注册等待可读事件
+    */
     stream->connection_cb(stream, 0);
 
+    /*
+      用户还没有消费 accept_fd。先解除 io 的事件，
+      等到用户调用 uv_accept 消费了 accepted_fd 再重新注册事件
+    */
     if (stream->accepted_fd != -1) {
       /* The user hasn't yet accepted called uv_accept() */
       uv__io_stop(loop, &stream->io_watcher, POLLIN);
       return;
     }
 
+    // 定时睡眠一会（可被信号唤醒），分点给别的进程 accept
     if (stream->type == UV_TCP &&
         (stream->flags & UV_HANDLE_TCP_SINGLE_ACCEPT)) {
       /* Give other processes a chance to accept connections. */
@@ -638,8 +672,10 @@ done:
               queued_fds->offset * sizeof(*queued_fds->fds));
     }
   } else {
+    // 消费完了，恢复为-1
     server->accepted_fd = -1;
     if (err == 0)
+      // 重新注册时间，处理下一个连接，有的话
       uv__io_start(server->loop, &server->io_watcher, POLLIN);
   }
   return err;
@@ -760,25 +796,23 @@ static int uv__write_req_update(uv_stream_t* stream,
 static void uv__write_req_finish(uv_write_t* req) {
   uv_stream_t* stream = req->handle;
 
-  /* Pop the req off tcp->write_queue. */
+  // 移出队列
   QUEUE_REMOVE(&req->queue);
 
-  /* Only free when there was no error. On error, we touch up write_queue_size
-   * right before making the callback. The reason we don't do that right away
-   * is that a write_queue_size > 0 is our only way to signal to the user that
-   * they should stop writing - which they should if we got an error. Something
-   * to revisit in future revisions of the libuv API.
-   */
+  // 写入成功了
   if (req->error == 0) {
+    /*
+      bufsml 是默认的 buf 数，如果不够，则 bufs 指向新的内存，
+      然后再储存数据。两者不等说明申请了额外的内存，需要 free 掉
+    */
     if (req->bufs != req->bufsml)
       uv__free(req->bufs);
     req->bufs = NULL;
   }
 
-  /* Add it to the write_completed_queue where it will have its
-   * callback called in the near future.
-   */
+  // 插入写完成队列
   QUEUE_INSERT_TAIL(&stream->write_completed_queue, &req->queue);
+  // 插入 pending 队列，在 pending 阶段执行回调
   uv__io_feed(stream->loop, &stream->io_watcher);
 }
 
@@ -912,33 +946,37 @@ static void uv__write(uv_stream_t* stream) {
   assert(uv__stream_fd(stream) >= 0);
 
   for (;;) {
+    // 待写队列为空，没得写
     if (QUEUE_EMPTY(&stream->write_queue))
       return;
 
+    // 遍历待写队列，把每个节点的数据写入底层
     q = QUEUE_HEAD(&stream->write_queue);
     req = QUEUE_DATA(q, uv_write_t, queue);
     assert(req->handle == stream);
 
+    // 返回成功写入的个数
     n = uv__try_write(stream,
                       &(req->bufs[req->write_index]),
                       req->nbufs - req->write_index,
                       req->send_handle);
 
-    /* Ensure the handle isn't sent again in case this is a partial write. */
     if (n >= 0) {
       req->send_handle = NULL;
+      // Returns 1 if all write request data has been written, or 0 if there is still more data to write
       if (uv__write_req_update(stream, req, n)) {
+        // 写完了本请求的数据，做后续处理
         uv__write_req_finish(req);
         return;  /* TODO(bnoordhuis) Start trying to write the next request. */
       }
     } else if (n != UV_EAGAIN)
       break;
 
-    /* If this is a blocking stream, try again. */
+    // 设置了一直写标记，则继续写
     if (stream->flags & UV_HANDLE_BLOCKING_WRITES)
       continue;
 
-    /* 重新启动io观察者 */
+    // 到这说明数据还没有完全被写入，注册等待可写事件，等待继续写
     uv__io_start(stream->loop, &stream->io_watcher, POLLOUT);
 
     /* Notify select() thread about state change */
@@ -948,8 +986,8 @@ static void uv__write(uv_stream_t* stream) {
   }
 
   req->error = n;
-  // XXX(jwn): this must call uv__stream_flush_write_queue(stream, n) here, since we won't generate any more events
   uv__write_req_finish(req);
+  // 撤销等待可写事件
   uv__io_stop(stream->loop, &stream->io_watcher, POLLOUT);
   uv__stream_osx_interrupt_select(stream);
 }
@@ -1274,6 +1312,7 @@ int uv_shutdown(uv_shutdown_t* req, uv_stream_t* stream, uv_shutdown_cb cb) {
          stream->type == UV_TTY ||
          stream->type == UV_NAMED_PIPE);
 
+  // 流是可写的，并且还没关闭写端，也不是处于正在关闭状态
   if (!(stream->flags & UV_HANDLE_WRITABLE) ||
       stream->flags & UV_HANDLE_SHUT ||
       stream->flags & UV_HANDLE_SHUTTING ||
@@ -1284,8 +1323,10 @@ int uv_shutdown(uv_shutdown_t* req, uv_stream_t* stream, uv_shutdown_cb cb) {
   assert(uv__stream_fd(stream) >= 0);
 
   /* 初始化请求 */
+  // 初始化一个关闭请求，关联的 handle 是 stream
   uv__req_init(stream->loop, req, UV_SHUTDOWN);
   req->handle = stream;
+  // 关闭后执行的回调
   req->cb = cb;
   stream->shutdown_req = req;
   stream->flags |= UV_HANDLE_SHUTTING;
@@ -1293,7 +1334,7 @@ int uv_shutdown(uv_shutdown_t* req, uv_stream_t* stream, uv_shutdown_cb cb) {
   /* 设置关闭标志位 */
   stream->flags &= ~UV_HANDLE_WRITABLE;
 
-  /* 初始化io观察者，将 io 观察者加入到队列中后，以便在事件循环的特定阶段进行处理 */
+  // 注册等待可写事件
   uv__io_start(stream->loop, &stream->io_watcher, POLLOUT);
   uv__stream_osx_interrupt_select(stream);
 
@@ -1427,6 +1468,7 @@ static int uv__check_before_write(uv_stream_t* stream,
   if (uv__stream_fd(stream) < 0)
     return UV_EBADF;
 
+  // 是不可写流
   if (!(stream->flags & UV_HANDLE_WRITABLE))
     return UV_EPIPE;
 
@@ -1458,6 +1500,7 @@ int uv_write2(uv_write_t* req,
               uv_stream_t* stream,
               const uv_buf_t bufs[],
               unsigned int nbufs,
+              // 需要传递的文件描述符所在的流
               uv_stream_t* send_handle,
               uv_write_cb cb) {
   int empty_queue;
@@ -1467,62 +1510,64 @@ int uv_write2(uv_write_t* req,
   if (err < 0)
     return err;
 
-  /* It's legal for write_queue_size > 0 even when the write_queue is empty;
-   * it means there are error-state requests in the write_completed_queue that
-   * will touch up write_queue_size later, see also uv__write_req_finish().
-   * We could check that write_queue is empty instead but that implies making
-   * a write() syscall when we know that the handle is in error mode.
-   */
-  /* 即使write_queue为空，write_queue_size> 0也合法；这意味着write_completed_queue中存在错误状态请求，这些错误状态请求将在以后修改write_queue_size */
+  // 流中缓存的数据大小是否为 0
   empty_queue = (stream->write_queue_size == 0);
 
-  /* Initialize the req */
-  /* 初始化请求 */
+  // 初始化一个写请求
   uv__req_init(stream->loop, req, UV_WRITE);
 
-  /* 注册回调函数，注册请求的stream handle */
+  // 写完后执行的回调
   req->cb = cb;
+  // 往哪个流写
   req->handle = stream;
+  // 写出错的错误码，初始化为 0
   req->error = 0;
   req->send_handle = send_handle;
   QUEUE_INIT(&req->queue);
 
+  // 默认 buf
   req->bufs = req->bufsml;
+  // 不够则扩容
   if (nbufs > ARRAY_SIZE(req->bufsml))
     req->bufs = uv__malloc(nbufs * sizeof(bufs[0]));
 
   if (req->bufs == NULL)
     return UV_ENOMEM;
 
+  // 把需要写入的数据填充到 req 中
   memcpy(req->bufs, bufs, nbufs * sizeof(bufs[0]));
+  // 需要写入的 buf 个数
   req->nbufs = nbufs;
+  // 目前写入的 buf 个数，初始化是 0
   req->write_index = 0;
+  // 更新流中待写数据的总长度，就是每个 buf 的数据大小加起来
   stream->write_queue_size += uv__count_bufs(bufs, nbufs);
 
-  /* Append the request to write_queue. */
-  /* 将请求追加到write_queue。 */
+  // 插入待写队列
   QUEUE_INSERT_TAIL(&stream->write_queue, &req->queue);
 
-  /* If the queue was empty when this function began, we should attempt to
-   * do the write immediately. Otherwise start the write_watcher and wait
-   * for the fd to become writable.
-   */
-  /* 如果此函数开始时队列为空，则应尝试立即进行写操作。否则，启动write_watcher并等待fd变为可写状态。 */
+  /*
+    stream->connect_req 非空说明是作为客户端，并且正在建立三次握手，建立成功
+    会置 connect_req 为 NULL。
+    这里非空说明还没有建立成功或者不是作为客户端（不是连接流）。即没有用到
+    connect_req 这个字段。
+ */
   if (stream->connect_req) {
     /* Still connecting, do nothing. */
     /* 仍在连接，什么也不做. */
   }
   else if (empty_queue) {
+    // 待写队列为空，则直接触发写动作，即操作文件描述符
     uv__write(stream);
   }
   else {
-    /*
-     * blocking streams should never have anything in the queue.
-     * if this assert fires then somehow the blocking stream isn't being
-     * sufficiently flushed in uv__write.
-     */
     /* 阻塞流永远不会在队列中有任何东西。 */
     assert(!(stream->flags & UV_HANDLE_BLOCKING_WRITES));
+    /*
+      队列非空，说明往底层写，uv__write 中不一样会注册等待可写事件，所以这
+      里注册一下
+      给流注册等待可写事件，触发的时候，把数据消费掉
+    */
     uv__io_start(stream->loop, &stream->io_watcher, POLLOUT);
     uv__stream_osx_interrupt_select(stream);
   }
@@ -1536,9 +1581,13 @@ int uv_write2(uv_write_t* req,
  */
 // 向stream handle 写入数据，实际上是调用uv_write2()这个函数
 int uv_write(uv_write_t* req,
+             // 往哪个流写
              uv_stream_t* handle,
+             // 一个写请求，记录了需要写入的数据和信息。数据来自下面的 const
              const uv_buf_t bufs[],
+             // 个数
              unsigned int nbufs,
+             // 写完后执行的回调
              uv_write_cb cb) {
   return uv_write2(req, handle, bufs, nbufs, NULL, cb);
 }
@@ -1575,13 +1624,10 @@ int uv__read_start(uv_stream_t* stream,
   assert(stream->type == UV_TCP || stream->type == UV_NAMED_PIPE ||
       stream->type == UV_TTY);
 
-  /* The UV_HANDLE_READING flag is irrelevant of the state of the stream - it
-   * just expresses the desired state of the user. */
   /* 设置标志位，表示此时流正在被使用读取 */
   stream->flags |= UV_HANDLE_READING;
   stream->flags &= ~UV_HANDLE_READ_EOF;
 
-  /* TODO: try to do the read inline? */
   assert(uv__stream_fd(stream) >= 0);
   assert(alloc_cb);
 
@@ -1590,7 +1636,9 @@ int uv__read_start(uv_stream_t* stream,
   stream->alloc_cb = alloc_cb;
 
   /* 启动io观察者 */
+  // 注册读事件
   uv__io_start(stream->loop, &stream->io_watcher, POLLIN);
+  // 激活 handle，有激活的 handle，事件循环不会退出
   uv__handle_start(stream);
   uv__stream_osx_interrupt_select(stream);
 
@@ -1599,16 +1647,16 @@ int uv__read_start(uv_stream_t* stream,
 
 // 与uv_read_start()函数刚好相反，uv_read_stop()函数是停止从流读取数据。 uv_read_cb 回调函数将不再被调用
 int uv_read_stop(uv_stream_t* stream) {
-  /* 如果它未被设置为 UV_HANDLE_READING 读取占用标志位，则不需要停止 */
+  // 是否正在执行读取操作，如果不是，则没有必要停止
   if (!(stream->flags & UV_HANDLE_READING))
     return 0;
 
-  /* 取消设置 UV_HANDLE_READING 标志位 */
+  // 清除正在读取的标记
   stream->flags &= ~UV_HANDLE_READING;
 
   /* 停止流读取，关闭流io观察者 */
   uv__io_stop(stream->loop, &stream->io_watcher, POLLIN);
-  /* 关闭这个 stream handle */
+  // 停掉 handle。允许事件循环退出
   uv__handle_stop(stream);
   uv__stream_osx_interrupt_select(stream);
 
@@ -1671,11 +1719,16 @@ void uv__stream_close(uv_stream_t* handle) {
   }
 #endif /* defined(__APPLE__) */
 
+  // 从事件循环中删除 io 观察者，移出 pending 队列
   uv__io_close(handle->loop, &handle->io_watcher);
+  // 停止读
   uv_read_stop(handle);
+  // 停掉 handle
   uv__handle_stop(handle);
+  // 不可读、写
   handle->flags &= ~(UV_HANDLE_READABLE | UV_HANDLE_WRITABLE);
 
+  // 关闭非标准流的文件描述符
   if (handle->io_watcher.fd != -1) {
     /* Don't close stdio file descriptors.  Nothing good comes from it. */
     if (handle->io_watcher.fd > STDERR_FILENO)
@@ -1683,12 +1736,14 @@ void uv__stream_close(uv_stream_t* handle) {
     handle->io_watcher.fd = -1;
   }
 
+  // 关闭通信 socket 对应的文件描述符
   if (handle->accepted_fd != -1) {
     uv__close(handle->accepted_fd);
     handle->accepted_fd = -1;
   }
 
   /* Close all queued fds */
+  // 同上，这是在排队等待处理的通信 socket
   if (handle->queued_fds != NULL) {
     queued_fds = handle->queued_fds;
     for (i = 0; i < queued_fds->offset; i++)

@@ -853,15 +853,19 @@ void uv_loop_delete(uv_loop_t* loop) {
 int uv_read_start(uv_stream_t* stream,
                   uv_alloc_cb alloc_cb,
                   uv_read_cb read_cb) {
+  
   if (stream == NULL || alloc_cb == NULL || read_cb == NULL)
     return UV_EINVAL;
 
+  // 流已经关闭，不能读
   if (stream->flags & UV_HANDLE_CLOSING)
     return UV_EINVAL;
 
+  // 流正在读
   if (stream->flags & UV_HANDLE_READING)
     return UV_EALREADY;
 
+  // 流不可读，说明可能是只写流
   if (!(stream->flags & UV_HANDLE_READABLE))
     return UV_ENOTCONN;
 
